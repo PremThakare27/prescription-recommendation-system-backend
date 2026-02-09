@@ -1,0 +1,24 @@
+{
+  "name": "prescription-recommendation-system-backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PremThakare27/prescription-recommendation-system-backend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/PremThakare27/prescription-recommendation-system-backend/issues"
+  },
+  "homepage": "https://github.com/PremThakare27/prescription-recommendation-system-backend#readme",
+  "description": "",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
