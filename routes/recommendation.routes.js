@@ -1,8 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const { protect, authorize } = require("../middleware/auth.middleware");
-const { getRecommendations } = require("../controllers/recommendation.controller");
+const { protect } = require("../middleware/auth.middleware");
+const { getRecommendations, chat } = require("../controllers/recommendation.controller");
 
-router.post("/", protect, authorize("doctor"), getRecommendations);
+router.use(protect);
+
+router.post("/", getRecommendations);
+router.post("/chat", chat);
 
 module.exports = router;

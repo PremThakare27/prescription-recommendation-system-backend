@@ -1,81 +1,97 @@
 const Prescription = require("../models/Prescription.model");
 
-// Simple symptom-to-medication mapping for the recommendation engine
-// In production, this would be replaced by an ML model or external medical API
-const symptomMap = {
-  fever: [
-    { name: "Paracetamol", dosage: "500mg", frequency: "Every 6 hours", duration: "5 days", instructions: "Take with water" },
-    { name: "Ibuprofen", dosage: "400mg", frequency: "Every 8 hours", duration: "3 days", instructions: "Take after meals" },
-  ],
-  headache: [
-    { name: "Paracetamol", dosage: "500mg", frequency: "Every 6 hours", duration: "3 days", instructions: "Take with water" },
-    { name: "Aspirin", dosage: "300mg", frequency: "Every 8 hours", duration: "3 days", instructions: "Avoid on empty stomach" },
-  ],
-  infection: [
-    { name: "Amoxicillin", dosage: "500mg", frequency: "Three times daily", duration: "7 days", instructions: "Complete the full course" },
-    { name: "Azithromycin", dosage: "250mg", frequency: "Once daily", duration: "5 days", instructions: "Take with or without food" },
-  ],
-  allergy: [
-    { name: "Cetirizine", dosage: "10mg", frequency: "Once daily", duration: "7 days", instructions: "Take at night" },
-    { name: "Loratadine", dosage: "10mg", frequency: "Once daily", duration: "7 days", instructions: "Take in the morning" },
-  ],
-  cough: [
-    { name: "Dextromethorphan", dosage: "15mg", frequency: "Every 6-8 hours", duration: "5 days", instructions: "Take with warm water" },
-    { name: "Guaifenesin", dosage: "400mg", frequency: "Every 4 hours", duration: "5 days", instructions: "Drink plenty of fluids" },
-  ],
-  pain: [
-    { name: "Ibuprofen", dosage: "400mg", frequency: "Every 8 hours", duration: "5 days", instructions: "Take after meals" },
-    { name: "Diclofenac", dosage: "50mg", frequency: "Twice daily", duration: "5 days", instructions: "Take with food" },
-  ],
-  diabetes: [
-    { name: "Metformin", dosage: "500mg", frequency: "Twice daily", duration: "30 days", instructions: "Take with meals" },
-  ],
-  hypertension: [
-    { name: "Amlodipine", dosage: "5mg", frequency: "Once daily", duration: "30 days", instructions: "Take at the same time each day" },
-  ],
+const symptomMedications = {
+  fever: ["Paracetamol", "Ibuprofen", "Aspirin"],
+  headache: ["Paracetamol", "Ibuprofen", "Aspirin"],
+  cough: ["Dextromethorphan", "Guaifenesin", "Codeine"],
+  cold: ["Cetirizine", "Loratadine", "Pseudoephedrine"],
+  infection: ["Amoxicillin", "Azithromycin", "Ciprofloxacin"],
+  pain: ["Ibuprofen", "Paracetamol", "Diclofenac"],
+  allergy: ["Cetirizine", "Loratadine", "Fexofenadine"],
+  diabetes: ["Metformin", "Glibenclamide", "Insulin"],
+  hypertension: ["Amlodipine", "Enalapril", "Losartan"],
+  acidity: ["Omeprazole", "Pantoprazole", "Ranitidine"],
 };
 
-// @route POST /api/recommendations
-// Doctor submits symptoms, gets medication suggestions
 exports.getRecommendations = async (req, res) => {
   try {
     const { symptoms } = req.body;
 
-    if (!symptoms || !Array.isArray(symptoms) || symptoms.length === 0) {
-      return res.status(400).json({ success: false, message: "Please provide an array of symptoms" });
+    if (!symptoms || symptoms.length === 0) {
+      return res.status(400).json({ success: false, message: "Symptoms are required" });
     }
 
-    const recommendations = [];
-    const seen = new Set();
-
+    const recommended = new Set();
     symptoms.forEach((symptom) => {
-      const key = symptom.toLowerCase().trim();
-      const matches = symptomMap[key] || [];
-      matches.forEach((med) => {
-        if (!seen.has(med.name)) {
-          seen.add(med.name);
-          recommendations.push({ ...med, basedOn: key });
-        }
-      });
+      const key = symptom.toLowerCase();
+      if (symptomMedications[key]) {
+        symptomMedications[key].forEach((med) => recommended.add(med));
+      }
     });
 
-    // Also pull the 3 most common medications prescribed for these symptoms from DB
-    const historicalData = await Prescription.aggregate([
-      { $match: { symptoms: { $in: symptoms.map((s) => new RegExp(s, "i")) } } },
+    const historical = await Prescription.aggregate([
       { $unwind: "$medications" },
       { $group: { _id: "$medications.name", count: { $sum: 1 } } },
       { $sort: { count: -1 } },
-      { $limit: 3 },
+      { $limit: 5 },
     ]);
 
     res.json({
       success: true,
       data: {
-        suggestions: recommendations,
-        historicallyCommon: historicalData.map((d) => ({ name: d._id, prescribedCount: d.count })),
-        disclaimer: "These are suggestions only. Always apply clinical judgment before prescribing.",
+        recommended: Array.from(recommended),
+        historical: historical.map((h) => ({ name: h._id, count: h.count })),
       },
     });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.chat = async (req, res) => {
+  try {
+    const { messages, systemPrompt } = req.body;
+
+    // Build Gemini conversation format
+    const geminiMessages = messages.map(msg => ({
+      role: msg.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: msg.content }]
+    }))
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [{ text: systemPrompt }]
+          },
+          contents: geminiMessages,
+          generationConfig: {
+            maxOutputTokens: 1000,
+            temperature: 0.7,
+          }
+        }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        success: false,
+        message: data.error?.message || "AI service error",
+      });
+    }
+
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!reply) {
+      return res.status(500).json({ success: false, message: "No response from AI" });
+    }
+
+    res.json({ success: true, reply });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
